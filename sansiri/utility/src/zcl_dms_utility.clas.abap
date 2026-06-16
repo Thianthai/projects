@@ -6,129 +6,90 @@ CLASS zcl_dms_utility DEFINITION
   PUBLIC SECTION.
 
     TYPES:
-      BEGIN OF ty_document,
-        object_id   TYPE string,
-        name        TYPE string,
-        mime_type   TYPE string,
-        size        TYPE i,
-        created_at  TYPE string,
-        modified_at TYPE string,
-      END OF ty_document,
-      tt_documents TYPE STANDARD TABLE OF ty_document WITH EMPTY KEY,
-
-      BEGIN OF ty_link,
-        document_id     TYPE string,
-        business_object TYPE string,
-        object_key      TYPE string,
-      END OF ty_link.
+      BEGIN OF ty_upload_result,
+        object_id   TYPE string,  " DMS Object ID ของไฟล์ที่ถูกอัปโหลด
+        object_name TYPE string,
+      END OF ty_upload_result.
 
     CLASS-METHODS:
-      "! Upload a document to DMS repository
-      "! @parameter iv_repository_id | DMS Repository ID
-      "! @parameter iv_file_name     | File name with extension
-      "! @parameter iv_mime_type     | MIME type (e.g. application/pdf)
-      "! @parameter iv_content       | File content as xstring
-      "! @parameter rv_object_id     | Returned DMS Object ID
+
+      "! Upload a document file to DMS repository
+      "! @parameter iv_file_name     | File name with extension e.g. invoice.pdf
+      "! @parameter iv_mime_type     | MIME type e.g. application/pdf, application/msword
+      "! @parameter iv_content       | File binary content as xstring
+      "! @parameter rs_result        | Upload result containing DMS Object ID
       upload_document
         IMPORTING
-          iv_repository_id TYPE string
-          iv_file_name     TYPE string
-          iv_mime_type     TYPE string
-          iv_content       TYPE xstring
+          iv_file_name  TYPE string
+          iv_mime_type  TYPE string
+          iv_content    TYPE xstring
         RETURNING
-          VALUE(rv_object_id) TYPE string
+          VALUE(rs_result) TYPE ty_upload_result
         RAISING
           zcx_dms_error,
 
-      "! Download a document from DMS
-      "! @parameter iv_repository_id | DMS Repository ID
-      "! @parameter iv_object_id     | DMS Object ID
-      "! @parameter rv_content       | File content as xstring
-      download_document
-        IMPORTING
-          iv_repository_id TYPE string
-          iv_object_id     TYPE string
-        RETURNING
-          VALUE(rv_content) TYPE xstring
-        RAISING
-          zcx_dms_error,
-
-      "! Link a DMS document to a business object
-      "! @parameter iv_repository_id  | DMS Repository ID
-      "! @parameter iv_document_id    | DMS Document ID
-      "! @parameter iv_business_object| Business Object type (e.g. 'BUS2012' for PO)
-      "! @parameter iv_object_key     | Business Object key
+      "! Link an uploaded DMS document to a SAP business object (e.g. FI Document)
+      "! Must be called after upload_document to get iv_object_id
+      "! @parameter iv_object_id       | DMS Object ID from upload_document result
+      "! @parameter iv_bo_type         | SAP Business Object type e.g. BKPF, BUS2012
+      "! @parameter iv_bo_key          | Business Object key
       link_to_business_object
         IMPORTING
-          iv_repository_id   TYPE string
-          iv_document_id     TYPE string
-          iv_business_object TYPE string
-          iv_object_key      TYPE string
-        RAISING
-          zcx_dms_error,
-
-      "! Search documents in DMS repository
-      "! @parameter iv_repository_id | DMS Repository ID
-      "! @parameter iv_query         | CMIS query string (optional)
-      "! @parameter iv_business_object | Filter by business object type (optional)
-      "! @parameter iv_object_key    | Filter by business object key (optional)
-      "! @parameter rt_documents     | List of matching documents
-      search_documents
-        IMPORTING
-          iv_repository_id   TYPE string
-          iv_query           TYPE string   OPTIONAL
-          iv_business_object TYPE string   OPTIONAL
-          iv_object_key      TYPE string   OPTIONAL
-        RETURNING
-          VALUE(rt_documents) TYPE tt_documents
+          iv_object_id   TYPE string
+          iv_bo_type     TYPE string
+          iv_bo_key      TYPE string
         RAISING
           zcx_dms_error.
 
   PRIVATE SECTION.
 
+    " ============================================================
+    " HARD-CODED DMS Configuration — Replace with actual values
+    " after DMS instance is provisioned and Communication
+    " Arrangement is configured in SAP BTP Cockpit / SAP S/4HANA
+    " ============================================================
+
     CONSTANTS:
-      c_destination   TYPE rfcdest VALUE 'DMS_BTP',       " SM59 HTTP Destination
-      c_api_path_base TYPE string  VALUE '/browser'.
+      "! [REPLACE] Communication Scenario ID defined in SE11 / SOAMANAGER
+      c_comm_scenario    TYPE string VALUE 'ZDMS_COMM_SCENARIO',
+
+      "! [REPLACE] DMS Repository ID from DMS Configuration (SDM cockpit)
+      c_repository_id    TYPE string VALUE 'repo-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+
+      "! [REPLACE] CMIS Object Type ID — usually 'cmis:document' unless custom type defined
+      c_object_type_id   TYPE string VALUE 'cmis:document',
+
+      "! [REPLACE] Relationship type defined in DMS for linking to SAP Business Object
+      "!           Check DMS Admin UI > Repository > Relationship Types
+      c_relationship_type TYPE string VALUE 'sap:relatesToBusinessObject'.
 
     CLASS-METHODS:
-      "! Create and configure HTTP client using SM59 destination
+
+      "! Create IF_WEB_HTTP_CLIENT via Communication Arrangement (ABAP Cloud compliant)
       create_http_client
         RETURNING
-          VALUE(ro_client) TYPE REF TO if_http_client
+          VALUE(ro_client) TYPE REF TO if_web_http_client
         RAISING
           zcx_dms_error,
 
-      "! Send HTTP request and return parsed JSON response
-      send_request
-        IMPORTING
-          io_client       TYPE REF TO if_http_client
-          iv_method       TYPE string
-          iv_path         TYPE string
-          iv_body         TYPE xstring OPTIONAL
-          iv_content_type TYPE string  OPTIONAL
-        RETURNING
-          VALUE(rv_response) TYPE string
-        RAISING
-          zcx_dms_error,
-
-      "! Parse HTTP error response and raise exception
-      handle_http_error
-        IMPORTING
-          iv_status_code TYPE i
-          iv_response    TYPE string
-        RAISING
-          zcx_dms_error,
-
-      "! Build multipart/form-data body for file upload
+      "! Build multipart/form-data body for CMIS document creation (browser binding)
       build_multipart_body
         IMPORTING
           iv_file_name    TYPE string
           iv_mime_type    TYPE string
           iv_content      TYPE xstring
-          iv_object_type  TYPE string DEFAULT 'cmis:document'
         EXPORTING
           ev_body         TYPE xstring
-          ev_content_type TYPE string.
+          ev_boundary     TYPE string,
+
+      "! Extract string value from a simple flat JSON response by key
+      "! e.g. get_json_value( iv_json = '{"objectId":"abc"}' iv_key = 'objectId' ) -> 'abc'
+      get_json_value
+        IMPORTING
+          iv_json TYPE string
+          iv_key  TYPE string
+        RETURNING
+          VALUE(rv_value) TYPE string.
 
 ENDCLASS.
 
@@ -136,150 +97,97 @@ ENDCLASS.
 CLASS zcl_dms_utility IMPLEMENTATION.
 
   METHOD upload_document.
-    DATA: lo_client       TYPE REF TO if_http_client,
-          lv_path         TYPE string,
-          lv_body         TYPE xstring,
-          lv_content_type TYPE string,
-          lv_response     TYPE string,
-          lo_json         TYPE REF TO /ui2/cl_json.
 
-    lo_client = create_http_client( ).
+    DATA(lo_client) = create_http_client( ).
 
-    lv_path = |{ c_api_path_base }/{ iv_repository_id }/root|.
+    " CMIS Browser Binding: POST to /browser/{repositoryId}/root
+    " with cmisaction=createDocument in multipart body
+    DATA(lv_path) = |/browser/{ c_repository_id }/root|.
+
+    DATA: lv_body     TYPE xstring,
+          lv_boundary TYPE string.
 
     build_multipart_body(
       IMPORTING
-        iv_file_name    = iv_file_name
-        iv_mime_type    = iv_mime_type
-        iv_content      = iv_content
+        iv_file_name = iv_file_name
+        iv_mime_type = iv_mime_type
+        iv_content   = iv_content
       EXPORTING
-        ev_body         = lv_body
-        ev_content_type = lv_content_type ).
+        ev_body      = lv_body
+        ev_boundary  = lv_boundary ).
 
-    lv_response = send_request(
-      io_client       = lo_client
-      iv_method       = 'POST'
-      iv_path         = lv_path
-      iv_body         = lv_body
-      iv_content_type = lv_content_type ).
+    DATA(lo_request) = lo_client->get_http_request( ).
+    lo_request->set_uri_path( lv_path ).
+    lo_request->set_header_field(
+      i_name  = 'Content-Type'
+      i_value = |multipart/form-data; boundary={ lv_boundary }| ).
+    lo_request->set_binary_data( lv_body ).
 
-    " Extract objectId from JSON response
-    DATA(lo_result) = /ui2/cl_json=>parse( lv_response ).
-    rv_object_id = lo_result->get_string( '$.objectId' ).
+    DATA(lo_response) = lo_client->execute( i_method = if_web_http_client=>post ).
 
-    lo_client->close( ).
+    DATA(lv_status) = lo_response->get_status( )-code.
+    DATA(lv_body_str) = lo_response->get_text( ).
 
-  ENDMETHOD.
-
-
-  METHOD download_document.
-    DATA: lo_client   TYPE REF TO if_http_client,
-          lv_path     TYPE string,
-          lv_response TYPE string.
-
-    lo_client = create_http_client( ).
-
-    lv_path = |{ c_api_path_base }/{ iv_repository_id }/root|
-           && |?objectId={ iv_object_id }&cmisselector=content|.
-
-    " For binary content, get raw bytes from response
-    lo_client->request->set_header_field(
-      name  = '~request_method'
-      value = 'GET' ).
-    lo_client->request->set_header_field(
-      name  = '~request_uri'
-      value = lv_path ).
-
-    lo_client->send( EXCEPTIONS OTHERS = 1 ).
-    lo_client->receive( EXCEPTIONS OTHERS = 1 ).
-
-    DATA(lv_status) = lo_client->response->get_status_code( ).
-    IF lv_status <> 200.
-      lv_response = lo_client->response->get_cdata( ).
-      handle_http_error( iv_status_code = lv_status iv_response = lv_response ).
+    IF lv_status <> 201.
+      RAISE EXCEPTION TYPE zcx_dms_error
+        EXPORTING
+          textid  = zcx_dms_error=>api_error
+          mv_info = |UPLOAD failed HTTP { lv_status }: { lv_body_str }|.
     ENDIF.
 
-    rv_content = lo_client->response->get_data( ).
+    " Parse objectId and name from CMIS JSON response
+    " Response example: {"objectId":"abc-123","name":"invoice.pdf",...}
+    rs_result-object_id   = get_json_value( iv_json = lv_body_str iv_key = 'objectId' ).
+    rs_result-object_name = get_json_value( iv_json = lv_body_str iv_key = 'name' ).
+
     lo_client->close( ).
 
   ENDMETHOD.
 
 
   METHOD link_to_business_object.
-    DATA: lo_client   TYPE REF TO if_http_client,
-          lv_path     TYPE string,
-          lv_json     TYPE string,
-          lv_body     TYPE xstring.
 
-    lo_client = create_http_client( ).
+    DATA(lo_client) = create_http_client( ).
 
-    lv_path = |/sdm/v1/repositories/{ iv_repository_id }|
-           && |/documents/{ iv_document_id }/links|.
+    " CMIS Browser Binding: POST to /browser/{repositoryId}/root
+    " with cmisaction=createRelationship to link document to business object
+    DATA(lv_path) = |/browser/{ c_repository_id }/root|.
 
-    lv_json = |\{"businessObject":"\{ iv_business_object }",|
-           && |"objectKey":"\{ iv_object_key }"\}|.
+    " Build form-urlencoded body for createRelationship
+    " iv_bo_key format depends on DMS configuration — confirm with DMS Admin
+    " e.g. for FI Document: "BKPF.<BUKRS>.<BELNR>.<GJAHR>"
+    DATA(lv_target_id) = |{ iv_bo_type }.{ iv_bo_key }|.
 
-    lv_body = cl_abap_codepage=>convert_to( lv_json ).
+    DATA(lv_body_str) =
+      |cmisaction=createRelationship|
+      && |&propertyId[0]=cmis:objectTypeId|
+      && |&propertyValue[0]={ c_relationship_type }|
+      && |&propertyId[1]=cmis:sourceId|
+      && |&propertyValue[1]={ iv_object_id }|
+      && |&propertyId[2]=cmis:targetId|
+      && |&propertyValue[2]={ lv_target_id }|.
 
-    send_request(
-      io_client       = lo_client
-      iv_method       = 'POST'
-      iv_path         = lv_path
-      iv_body         = lv_body
-      iv_content_type = 'application/json' ).
+    DATA(lv_body) = cl_abap_codepage=>convert_to(
+      source   = lv_body_str
+      codepage = 'UTF-8' ).
 
-    lo_client->close( ).
+    DATA(lo_request) = lo_client->get_http_request( ).
+    lo_request->set_uri_path( lv_path ).
+    lo_request->set_header_field(
+      i_name  = 'Content-Type'
+      i_value = 'application/x-www-form-urlencoded' ).
+    lo_request->set_binary_data( lv_body ).
 
-  ENDMETHOD.
+    DATA(lo_response) = lo_client->execute( i_method = if_web_http_client=>post ).
 
+    DATA(lv_status) = lo_response->get_status( )-code.
 
-  METHOD search_documents.
-    DATA: lo_client    TYPE REF TO if_http_client,
-          lv_path      TYPE string,
-          lv_query_str TYPE string,
-          lv_response  TYPE string.
-
-    lo_client = create_http_client( ).
-
-    IF iv_query IS NOT INITIAL.
-      lv_query_str = iv_query.
-    ELSEIF iv_business_object IS NOT INITIAL AND iv_object_key IS NOT INITIAL.
-      lv_query_str = |SELECT * FROM cmis:document WHERE |
-                  && |sap:bo = '\{ iv_business_object }' AND |
-                  && |sap:bokey = '\{ iv_object_key }'|.
-    ELSE.
-      lv_query_str = 'SELECT * FROM cmis:document'.
-    ENDIF.
-
-    " URL-encode the query
-    DATA(lv_encoded_query) = cl_http_utility=>escape_url( lv_query_str ).
-
-    lv_path = |{ c_api_path_base }/{ iv_repository_id }/root|
-           && |?cmisselector=query&q={ lv_encoded_query }|.
-
-    lv_response = send_request(
-      io_client = lo_client
-      iv_method = 'GET'
-      iv_path   = lv_path ).
-
-    " Parse JSON array into result table
-    DATA(lo_json_array) = /ui2/cl_json=>parse( lv_response ).
-    DATA(lo_results)    = lo_json_array->get( '$.results' ).
-
-    IF lo_results IS BOUND.
-      DATA(lv_count) = lo_results->get_count( ).
-      DATA(lv_idx)   = 0.
-      WHILE lv_idx < lv_count.
-        DATA(lo_item) = lo_results->get_item( lv_idx ).
-        DATA ls_doc TYPE ty_document.
-        ls_doc-object_id   = lo_item->get_string( '$.objectId' ).
-        ls_doc-name        = lo_item->get_string( '$.name' ).
-        ls_doc-mime_type   = lo_item->get_string( '$.contentStreamMimeType' ).
-        ls_doc-created_at  = lo_item->get_string( '$.creationDate' ).
-        ls_doc-modified_at = lo_item->get_string( '$.lastModificationDate' ).
-        APPEND ls_doc TO rt_documents.
-        lv_idx = lv_idx + 1.
-      ENDWHILE.
+    IF lv_status <> 201.
+      DATA(lv_resp_body) = lo_response->get_text( ).
+      RAISE EXCEPTION TYPE zcx_dms_error
+        EXPORTING
+          textid  = zcx_dms_error=>api_error
+          mv_info = |LINK failed HTTP { lv_status }: { lv_resp_body }|.
     ENDIF.
 
     lo_client->close( ).
@@ -288,122 +196,86 @@ CLASS zcl_dms_utility IMPLEMENTATION.
 
 
   METHOD create_http_client.
-    cl_http_client=>create_by_destination(
-      EXPORTING
-        destination              = c_destination
-      IMPORTING
-        client                   = ro_client
-      EXCEPTIONS
-        argument_not_found       = 1
-        destination_not_found    = 2
-        destination_no_authority = 3
-        plugin_not_active        = 4
-        internal_error           = 5
-        OTHERS                   = 6 ).
 
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE zcx_dms_error
-        EXPORTING
-          textid  = zcx_dms_error=>destination_error
-          mv_info = |Cannot create HTTP client for destination: { c_destination }|.
-    ENDIF.
+    TRY.
+        " [REPLACE] Communication Arrangement must be created in
+        " SAP S/4HANA Cloud: IMG > Communication Management > Communication Arrangements
+        " pointing to your BTP DMS service instance
+        DATA(lo_destination) = cl_http_destination_provider=>create_by_comm_arrangement(
+          comm_scenario = c_comm_scenario ).
 
-  ENDMETHOD.
+        ro_client = cl_web_http_client_manager=>create_by_http_destination( lo_destination ).
 
-
-  METHOD send_request.
-    io_client->request->set_header_field(
-      name  = '~request_method'
-      value = iv_method ).
-    io_client->request->set_header_field(
-      name  = '~request_uri'
-      value = iv_path ).
-
-    IF iv_content_type IS NOT INITIAL.
-      io_client->request->set_header_field(
-        name  = 'Content-Type'
-        value = iv_content_type ).
-    ENDIF.
-
-    IF iv_body IS NOT INITIAL.
-      io_client->request->set_data( iv_body ).
-    ENDIF.
-
-    io_client->send( EXCEPTIONS OTHERS = 1 ).
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE zcx_dms_error
-        EXPORTING
-          textid  = zcx_dms_error=>send_error
-          mv_info = |HTTP send failed for { iv_method } { iv_path }|.
-    ENDIF.
-
-    io_client->receive( EXCEPTIONS OTHERS = 1 ).
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE zcx_dms_error
-        EXPORTING
-          textid  = zcx_dms_error=>receive_error
-          mv_info = |HTTP receive failed for { iv_method } { iv_path }|.
-    ENDIF.
-
-    DATA(lv_status) = io_client->response->get_status_code( ).
-    rv_response     = io_client->response->get_cdata( ).
-
-    IF lv_status >= 400.
-      handle_http_error(
-        iv_status_code = lv_status
-        iv_response    = rv_response ).
-    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD handle_http_error.
-    DATA(lv_msg) = |HTTP { iv_status_code }: { iv_response }|.
-
-    CASE iv_status_code.
-      WHEN 401 OR 403.
+      CATCH cx_http_dest_provider_error INTO DATA(lx_dest).
         RAISE EXCEPTION TYPE zcx_dms_error
           EXPORTING
-            textid  = zcx_dms_error=>auth_error
-            mv_info = lv_msg.
-      WHEN 404.
+            textid  = zcx_dms_error=>destination_error
+            mv_info = |Cannot create HTTP destination: { lx_dest->get_text( ) }|.
+
+      CATCH cx_web_http_client_error INTO DATA(lx_client).
         RAISE EXCEPTION TYPE zcx_dms_error
           EXPORTING
-            textid  = zcx_dms_error=>not_found
-            mv_info = lv_msg.
-      WHEN OTHERS.
-        RAISE EXCEPTION TYPE zcx_dms_error
-          EXPORTING
-            textid  = zcx_dms_error=>api_error
-            mv_info = lv_msg.
-    ENDCASE.
+            textid  = zcx_dms_error=>destination_error
+            mv_info = |Cannot create HTTP client: { lx_client->get_text( ) }|.
+    ENDTRY.
 
   ENDMETHOD.
 
 
   METHOD build_multipart_body.
-    " Generate unique boundary
-    DATA(lv_boundary) = |----FormBoundary{ sy-timlo }{ sy-datum }|.
-    ev_content_type = |multipart/form-data; boundary={ lv_boundary }|.
 
-    " Part 1: document metadata (JSON)
-    DATA(lv_meta_json) = |\{"cmis:name":"\{ iv_file_name }",|
-                       && |"cmis:objectTypeId":"\{ iv_object_type }"\}|.
+    " Generate unique boundary using timestamp
+    DATA(lv_ts) = cl_abap_context_info=>get_system_date( ) &&
+                  cl_abap_context_info=>get_system_time( ).
+    ev_boundary = |DMS_BOUNDARY_{ lv_ts }|.
 
-    DATA(lv_body_str) TYPE string.
-    lv_body_str = |--{ lv_boundary }\r\n|
-               && |Content-Disposition: form-data; name="propertyValues"\r\n|
-               && |Content-Type: application/json;charset=utf-8\r\n\r\n|
-               && |{ lv_meta_json }\r\n|
-               && |--{ lv_boundary }\r\n|
-               && |Content-Disposition: form-data; name="contentfile"; filename="\{ iv_file_name }"\r\n|
-               && |Content-Type: { iv_mime_type }\r\n\r\n|.
+    " Part 1: CMIS properties (JSON) — tells DMS to create a document
+    DATA(lv_props_json) =
+      |\{"cmis:name":"\{ iv_file_name }",|
+      && |"cmis:objectTypeId":"\{ c_object_type_id }"\}|.
 
-    " Convert text prefix to xstring then append binary content then closing boundary
-    DATA(lv_prefix) = cl_abap_codepage=>convert_to( lv_body_str ).
-    DATA(lv_suffix) = cl_abap_codepage=>convert_to( |\r\n--{ lv_boundary }--\r\n| ).
+    DATA(lv_part1) =
+      |--{ ev_boundary }\r\n|
+      && |Content-Disposition: form-data; name="propertyValues"\r\n|
+      && |Content-Type: application/json;charset=utf-8\r\n\r\n|
+      && |{ lv_props_json }\r\n|.
+
+    " Part 2: cmisaction field
+    DATA(lv_part2) =
+      |--{ ev_boundary }\r\n|
+      && |Content-Disposition: form-data; name="cmisaction"\r\n\r\n|
+      && |createDocument\r\n|.
+
+    " Part 3: file binary content
+    DATA(lv_part3_header) =
+      |--{ ev_boundary }\r\n|
+      && |Content-Disposition: form-data; name="contentfile"; filename="\{ iv_file_name }"\r\n|
+      && |Content-Type: { iv_mime_type }\r\n\r\n|.
+
+    DATA(lv_part3_footer) = |\r\n--{ ev_boundary }--\r\n|.
+
+    " Concatenate all parts as xstring (preserve binary content intact)
+    DATA(lv_prefix) = cl_abap_codepage=>convert_to(
+      source   = lv_part1 && lv_part2 && lv_part3_header
+      codepage = 'UTF-8' ).
+
+    DATA(lv_suffix) = cl_abap_codepage=>convert_to(
+      source   = lv_part3_footer
+      codepage = 'UTF-8' ).
 
     ev_body = lv_prefix && iv_content && lv_suffix.
+
+  ENDMETHOD.
+
+
+  METHOD get_json_value.
+    " Simple regex-based extraction for flat JSON strings
+    " Not suitable for nested JSON — use XCO JSON library if complexity grows
+    DATA(lv_pattern) = |"\{ iv_key }"\\s*:\\s*"([^"]*)"|.
+
+    FIND FIRST OCCURRENCE OF REGEX lv_pattern
+      IN iv_json
+      SUBMATCHES rv_value.
 
   ENDMETHOD.
 
