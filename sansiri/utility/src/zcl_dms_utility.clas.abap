@@ -72,6 +72,30 @@ CLASS zcl_dms_utility DEFINITION
         RETURNING
           VALUE(rs_result) TYPE ty_upload_result
         RAISING
+          zcx_dms_error,
+
+      "! [Standard ABAP — not ABAP Cloud compliant due to SSF/spool APIs]
+      "! Full end-to-end: render SmartForm to PDF silently, upload to DMS,
+      "! and link the result to a SAP business object in one call.
+      "! Step 1 — prepare SSF params
+      "! Step 2 — get SmartForm FM name
+      "! Step 3 — caller runs SmartForm FM with their own data (see comment inside)
+      "! Step 4 — convert spool to PDF and upload to DMS
+      "! Step 5 — link DMS document to business object
+      "! @parameter iv_formname    | SmartForm name e.g. ZSMARTFORM_PAYMENT
+      "! @parameter iv_file_name   | Filename for DMS e.g. payment_slip.pdf
+      "! @parameter iv_bo_type     | Business Object type e.g. BKPF, BUS2012
+      "! @parameter iv_bo_key      | Business Object key e.g. 0001.1800000001.2025
+      "! @parameter rs_result      | Upload result containing DMS Object ID
+      attach_smartform_to_bo
+        IMPORTING
+          iv_formname      TYPE tdsfname
+          iv_file_name     TYPE string
+          iv_bo_type       TYPE string
+          iv_bo_key        TYPE string
+        RETURNING
+          VALUE(rs_result) TYPE ty_upload_result
+        RAISING
           zcx_dms_error.
 
   PRIVATE SECTION.
@@ -342,6 +366,84 @@ CLASS zcl_dms_utility IMPLEMENTATION.
       codepage = 'UTF-8' ).
 
     ev_body = lv_prefix && iv_content && lv_suffix.
+
+  ENDMETHOD.
+
+
+  METHOD attach_smartform_to_bo.
+
+    " ----------------------------------------------------------------
+    " Step 1: Get SSF parameters configured for silent spool output
+    " ----------------------------------------------------------------
+    DATA(ls_params) = prepare_smartform_params( ).
+
+    " ----------------------------------------------------------------
+    " Step 2: Resolve SmartForm name to its generated function module
+    " ----------------------------------------------------------------
+    DATA lv_fm_name TYPE rs38l_fnam.
+
+    CALL FUNCTION 'SSF_FUNCTION_MODULE_NAME'
+      EXPORTING
+        formname           = iv_formname
+      IMPORTING
+        fm_name            = lv_fm_name
+      EXCEPTIONS
+        no_form            = 1
+        no_function_module = 2
+        OTHERS             = 3.
+
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_dms_error
+        EXPORTING
+          textid  = zcx_dms_error=>api_error
+          mv_info = |SmartForm '{ iv_formname }' not found or has no function module|.
+    ENDIF.
+
+    " ----------------------------------------------------------------
+    " Step 3: Call SmartForm FM — insert form-specific data here
+    " [REPLACE] Replace the EXPORTING/TABLES parameters below with
+    "           the actual import parameters of your SmartForm.
+    "           Keep CONTROL_PARAMETERS and OUTPUT_OPTIONS as-is.
+    " ----------------------------------------------------------------
+    DATA ls_job_output TYPE ssfoutput_optline.
+
+    CALL FUNCTION lv_fm_name
+      EXPORTING
+        control_parameters = ls_params-control_parameters
+        output_options     = ls_params-output_options
+*       user_settings      = abap_false          " usually keep false for background
+*       <your_form_param>  = <your_data>         " [REPLACE] form-specific data
+      IMPORTING
+        job_output_options = ls_job_output
+      EXCEPTIONS
+        formatting_error   = 1
+        internal_error     = 2
+        send_error         = 3
+        user_canceled      = 4
+        OTHERS             = 5.
+
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_dms_error
+        EXPORTING
+          textid  = zcx_dms_error=>api_error
+          mv_info = |SmartForm '{ iv_formname }' execution failed (subrc={ sy-subrc })|.
+    ENDIF.
+
+    " ----------------------------------------------------------------
+    " Step 4: Convert spool output to PDF and upload to DMS
+    " Spool request ID is returned in job_output_options after FM call
+    " ----------------------------------------------------------------
+    rs_result = upload_smartform_to_dms(
+      iv_spool_job_id = ls_job_output-spool_id    " [REPLACE] confirm field name with SSF output structure
+      iv_file_name    = iv_file_name ).
+
+    " ----------------------------------------------------------------
+    " Step 5: Link uploaded document to the business object
+    " ----------------------------------------------------------------
+    link_to_business_object(
+      iv_object_id = rs_result-object_id
+      iv_bo_type   = iv_bo_type
+      iv_bo_key    = iv_bo_key ).
 
   ENDMETHOD.
 
