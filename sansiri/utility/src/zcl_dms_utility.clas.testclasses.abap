@@ -128,8 +128,11 @@ CLASS ltc_smartform_attach IMPLEMENTATION.
     " Step 4: Convert spool to PDF xstring
     " Get spool ID from SSFCRESCL-SPOOLIDS internal table (first entry)
     " ----------------------------------------------------------------
+    DATA lv_spool_id TYPE rqident.
+    READ TABLE ls_job_info-spoolids INTO lv_spool_id INDEX 1.
+
     DATA(lv_pdf) = convert_spool_to_xstring(
-      iv_spool_job_id = ls_job_info-spoolids[ 1 ] ).
+      iv_spool_job_id = lv_spool_id ).
 
     cl_abap_unit_assert=>assert_not_initial(
       act = lv_pdf
@@ -209,7 +212,7 @@ CLASS ltc_smartform_attach IMPLEMENTATION.
     " Concatenate all PDF lines into xstring then trim to actual byte length
     LOOP AT lt_pdf INTO DATA(lv_line).
       rv_pdf = rv_pdf && cl_abap_codepage=>convert_to(
-        source   = lv_line
+        source   = CONV string( lv_line-tdline )
         codepage = 'UTF-8' ).
     ENDLOOP.
 
