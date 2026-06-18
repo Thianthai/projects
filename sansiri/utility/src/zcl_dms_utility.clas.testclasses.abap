@@ -23,31 +23,30 @@ CLASS ltc_smartform_attach DEFINITION FINAL FOR TESTING
     " ---------------------------------------------------------------
     CONSTANTS:
       "! [REPLACE] SmartForm name to test
-      c_formname    TYPE tdsfname VALUE 'ZSMARTFORM_PAYMENT',
+      c_formname     TYPE tdsfname   VALUE 'ZSMARTFORM_PAYMENT',
 
       "! [REPLACE] Desired filename in DMS
-      c_file_name   TYPE string   VALUE 'payment_slip.pdf',
+      c_file_name    TYPE string     VALUE 'payment_slip.pdf',
 
       "! [REPLACE] Business Object type for the link
-      c_bo_type     TYPE string   VALUE 'BKPF',
+      c_bo_type      TYPE string     VALUE 'BKPF',
 
       "! [REPLACE] Business Object key — confirm format with DMS Admin
       "!           e.g. BKPF key format: "<BUKRS>.<BELNR>.<GJAHR>"
-      c_bo_key      TYPE string   VALUE '0001.1800000001.2025',
+      c_bo_key       TYPE string     VALUE '0001.1800000001.2025',
 
       "! [REPLACE] Spool output device — must exist in SPAD, non-physical printer
-      c_spool_device TYPE tdprnter VALUE 'LOCL'.
+      c_spool_device TYPE rspopname  VALUE 'LOCL'.
 
     METHODS:
       "! Full flow: SmartForm → spool → PDF → DMS → link to BO
-      test_attach_smartform_to_fi_doc FOR TESTING.
+      test_attach_smartform FOR TESTING,
 
-    METHODS:
       "! Configure SSF parameters for silent spool output (no physical print)
       prepare_smartform_params
-        RETURNING
-          VALUE(rs_ctrl) TYPE ssfctrlop
-          VALUE(rs_outp) TYPE ssfcompop,   " not valid syntax — see implementation
+        EXPORTING
+          es_ctrl TYPE ssfctrlop
+          es_outp TYPE ssfcompop,
 
       "! Convert spool request number to PDF xstring
       convert_spool_to_xstring
@@ -56,29 +55,25 @@ CLASS ltc_smartform_attach DEFINITION FINAL FOR TESTING
         RETURNING
           VALUE(rv_pdf)   TYPE xstring
         RAISING
-          zcx_dms_error.
+          zcl_dms_error.
 
 ENDCLASS.
 
 
 CLASS ltc_smartform_attach IMPLEMENTATION.
 
-  METHOD test_attach_smartform_to_fi_doc.
+  METHOD test_attach_smartform.
 
     " ----------------------------------------------------------------
     " Step 1: Configure SSF params for silent spool output
     " ----------------------------------------------------------------
-    DATA ls_ctrl TYPE ssfctrlop.
-    DATA ls_outp TYPE ssfcompop.
+    DATA: ls_ctrl TYPE ssfctrlop,
+          ls_outp TYPE ssfcompop.
 
-    ls_ctrl-no_dialog = abap_true.
-    ls_ctrl-preview   = abap_false.
-    ls_ctrl-getotf    = abap_false.   " output to spool, not OTF table
-
-    " [REPLACE] c_spool_device: non-physical printer device in SPAD
-    ls_outp-tddest    = c_spool_device.
-    ls_outp-tdnoprev  = abap_true.    " no preview dialog
-    ls_outp-tdnoprint = abap_true.    " create spool entry but do NOT send to printer
+    prepare_smartform_params(
+      IMPORTING
+        es_ctrl = ls_ctrl
+        es_outp = ls_outp ).
 
     " ----------------------------------------------------------------
     " Step 2: Resolve SmartForm name to its generated function module
@@ -161,6 +156,20 @@ CLASS ltc_smartform_attach IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD prepare_smartform_params.
+
+    es_ctrl-no_dialog = abap_true.
+    es_ctrl-preview   = abap_false.
+    es_ctrl-getotf    = abap_false.   " output to spool, not OTF table
+
+    " [REPLACE] c_spool_device: non-physical printer device in SPAD
+    es_outp-tddest    = c_spool_device.
+    es_outp-tdnoprev  = abap_true.    " no preview dialog
+    es_outp-tdnoprint = abap_true.    " create spool entry but do NOT send to printer
+
+  ENDMETHOD.
+
+
   METHOD convert_spool_to_xstring.
 
     " CONVERT_ABAPSPOOLJOB_2_PDF is Standard ABAP only
@@ -189,9 +198,9 @@ CLASS ltc_smartform_attach IMPLEMENTATION.
         OTHERS                = 8.
 
     IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE zcx_dms_error
+      RAISE EXCEPTION TYPE zcl_dms_error
         EXPORTING
-          textid  = zcx_dms_error=>api_error
+          textid  = zcl_dms_error=>api_error
           mv_info = |Spool to PDF failed (subrc={ sy-subrc }) for spool { iv_spool_job_id }|.
     ENDIF.
 
@@ -204,11 +213,6 @@ CLASS ltc_smartform_attach IMPLEMENTATION.
 
     rv_pdf = rv_pdf(lv_pdf_len).
 
-  ENDMETHOD.
-
-  METHOD prepare_smartform_params. "#EC NEEDED
-    " Unused — logic is inlined inside test_attach_smartform_to_fi_doc
-    " for readability of the step-by-step flow
   ENDMETHOD.
 
 ENDCLASS.

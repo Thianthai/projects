@@ -26,7 +26,7 @@ CLASS zcl_dms_utility DEFINITION
         RETURNING
           VALUE(rs_result) TYPE ty_upload_result
         RAISING
-          zcx_dms_error,
+          zcl_dms_error,
 
       "! Link an uploaded DMS document to a SAP business object (e.g. FI Document)
       "! Must be called after upload_document to get iv_object_id
@@ -39,7 +39,7 @@ CLASS zcl_dms_utility DEFINITION
           iv_bo_type   TYPE string
           iv_bo_key    TYPE string
         RAISING
-          zcx_dms_error.
+          zcl_dms_error.
 
   PRIVATE SECTION.
 
@@ -71,7 +71,7 @@ CLASS zcl_dms_utility DEFINITION
         RETURNING
           VALUE(ro_client) TYPE REF TO if_http_client
         RAISING
-          zcx_dms_error,
+          zcl_dms_error,
 
       "! Send HTTP request and return response body as string
       send_request
@@ -84,7 +84,7 @@ CLASS zcl_dms_utility DEFINITION
         RETURNING
           VALUE(rv_response) TYPE string
         RAISING
-          zcx_dms_error,
+          zcl_dms_error,
 
       "! Build multipart/form-data body for CMIS document creation (browser binding)
       build_multipart_body
@@ -202,9 +202,9 @@ CLASS zcl_dms_utility IMPLEMENTATION.
         OTHERS                   = 6 ).
 
     IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE zcx_dms_error
+      RAISE EXCEPTION TYPE zcl_dms_error
         EXPORTING
-          textid  = zcx_dms_error=>destination_error
+          textid  = zcl_dms_error=>destination_error
           mv_info = |Cannot create HTTP client for SM59 destination: { c_destination }|.
     ENDIF.
 
@@ -235,9 +235,9 @@ CLASS zcl_dms_utility IMPLEMENTATION.
         OTHERS                     = 3 ).
 
     IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE zcx_dms_error
+      RAISE EXCEPTION TYPE zcl_dms_error
         EXPORTING
-          textid  = zcx_dms_error=>send_error
+          textid  = zcl_dms_error=>send_error
           mv_info = |HTTP send failed: { iv_method } { iv_path }|.
     ENDIF.
 
@@ -249,19 +249,22 @@ CLASS zcl_dms_utility IMPLEMENTATION.
         OTHERS                     = 4 ).
 
     IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE zcx_dms_error
+      RAISE EXCEPTION TYPE zcl_dms_error
         EXPORTING
-          textid  = zcx_dms_error=>receive_error
+          textid  = zcl_dms_error=>receive_error
           mv_info = |HTTP receive failed: { iv_method } { iv_path }|.
     ENDIF.
 
-    DATA(lv_status) = io_client->response->get_status_code( ).
+    DATA lv_status TYPE i.
+    io_client->response->get_status(
+      IMPORTING
+        code = lv_status ).
     rv_response     = io_client->response->get_cdata( ).
 
     IF lv_status >= 400.
-      RAISE EXCEPTION TYPE zcx_dms_error
+      RAISE EXCEPTION TYPE zcl_dms_error
         EXPORTING
-          textid  = zcx_dms_error=>api_error
+          textid  = zcl_dms_error=>api_error
           mv_info = |HTTP { lv_status }: { rv_response }|.
     ENDIF.
 
