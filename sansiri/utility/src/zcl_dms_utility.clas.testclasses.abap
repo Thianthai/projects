@@ -100,7 +100,8 @@ CLASS ltc_smartform_attach IMPLEMENTATION.
     " [REPLACE] Add form-specific EXPORTING/TABLES parameters below
     "           to pass the actual business document data to the form
     " ----------------------------------------------------------------
-    DATA ls_job_output TYPE ssfoutput_optline.
+    DATA ls_job_output  TYPE ssfcresop.
+    DATA ls_job_info    TYPE ssfcrescl.
 
     CALL FUNCTION lv_fm_name
       EXPORTING
@@ -109,6 +110,7 @@ CLASS ltc_smartform_attach IMPLEMENTATION.
 *       user_settings      = abap_false
 *       <your_form_param>  = <your_data>     " [REPLACE] form-specific data
       IMPORTING
+        job_output_info    = ls_job_info
         job_output_options = ls_job_output
       EXCEPTIONS
         formatting_error   = 1
@@ -124,10 +126,10 @@ CLASS ltc_smartform_attach IMPLEMENTATION.
 
     " ----------------------------------------------------------------
     " Step 4: Convert spool to PDF xstring
-    " [REPLACE] Confirm spool_id field name from ls_job_output in SE11
+    " Get spool ID from SSFCRESCL-SPOOLIDS internal table (first entry)
     " ----------------------------------------------------------------
     DATA(lv_pdf) = convert_spool_to_xstring(
-      iv_spool_job_id = ls_job_output-spool_id ).
+      iv_spool_job_id = ls_job_info-spoolids[ 1 ] ).
 
     cl_abap_unit_assert=>assert_not_initial(
       act = lv_pdf
